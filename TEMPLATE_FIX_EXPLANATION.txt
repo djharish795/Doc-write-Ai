@@ -1,0 +1,182 @@
+═══════════════════════════════════════════════════════════════════════════════
+  TEMPLATE PROCESSING FIX - COMPLETE EXPLANATION
+═══════════════════════════════════════════════════════════════════════════════
+
+PROBLEM IDENTIFIED:
+-------------------
+The system was NOT using the uploaded agreement template file. Instead, it was:
+1. Extracting text from the template
+2. Asking AI to fill it
+3. Creating a NEW generic DOCX from scratch
+4. Result: Lost all original formatting, structure, and Telugu/Hindi text
+
+This is why you got a generic English document instead of your template filled with data.
+
+
+THE CORRECT LOGIC (NOW IMPLEMENTED):
+-------------------------------------
+
+Step 1: User uploads AGREEMENT TEMPLATE (DOCX with placeholders)
+   Example template content:
+   ```
+   SALE AGREEMENT
+   
+   Buyer Name: [Buyer Name]
+   Seller Name: [Seller Name]
+   Property: [Property Description]
+   Survey No: [Survey Number]
+   Village: [Village]
+   Amount: [Total Amount]
+   ...
+   ```
+
+Step 2: User uploads SALE DEED (original document from seller)
+   - System extracts property details using AI
+   - Gets: survey number, village, mandal, district, boundaries, etc.
+
+Step 3: User enters TRANSACTION DETAILS manually
+   - Buyer name, address, father name
+   - Seller name, address, father name
+   - Total amount, advance, balance
+   - Date, transaction number
+
+Step 4: AI EXTRACTS data from sale deed
+   - Parses the sale deed document
+   - Extracts property-specific fields
+   - Merges with user inputs
+
+Step 5: FILL THE TEMPLATE (NEW LOGIC)
+   ┌─────────────────────────────────────────────────────────┐
+   │  1. Load the uploaded template DOCX as a ZIP file      │
+   │  2. Extract the document.xml (contains the structure)   │
+   │  3. Use AI to identify ALL placeholders in template     │
+   │  4. Create a mapping: placeholder → actual value        │
+   │     Example:                                            │
+   │     {                                                   │
+   │       "[Buyer Name]": "SURESH",                        │
+   │       "[Seller Name]": "HARISH",                       │
+   │       "[Survey Number]": "123/4A",                     │
+   │       "[Village]": "Patamata",                         │
+   │       ...                                              │
+   │     }                                                   │
+   │  5. Replace placeholders in the XML directly           │
+   │  6. Preserve ALL original formatting, fonts, styles    │
+   │  7. Keep Telugu/Hindi text intact                      │
+   │  8. Generate the modified DOCX                         │
+   └─────────────────────────────────────────────────────────┘
+
+
+FILES MODIFIED:
+---------------
+
+1. src/app/api/generate-report/route.ts
+   - Added JSZip import to manipulate DOCX as ZIP
+   - Rewrote processDOCXTemplate() function
+   - Now preserves original template structure
+   - Uses AI to map placeholders to data
+   - Replaces placeholders in XML directly
+   - Keeps all formatting intact
+
+2. package.json
+   - Added "jszip": "^3.10.1" dependency
+
+
+HOW IT WORKS NOW:
+-----------------
+
+When user clicks "Download Agreement Document":
+
+1. Frontend sends to /api/generate-report:
+   {
+     data: {
+       buyerName: "SURESH",
+       sellerName: "HARISH",
+       surveyNumber: "123/4A",
+       village: "Patamata",
+       totalAmount: "300000",
+       ... (all extracted + manual data)
+     },
+     template: "data:application/vnd...;base64,UEsDBBQABg..." (your uploaded template),
+     templateType: "docx"
+   }
+
+2. Backend processes:
+   a) Loads template DOCX as ZIP
+   b) Extracts document.xml
+   c) Asks AI: "Find all placeholders like [Buyer Name], [Survey Number], etc."
+   d) AI returns mapping of placeholders to values
+   e) Replaces each placeholder in the XML
+   f) Generates modified DOCX with same structure
+   g) Returns the filled document
+
+3. User downloads: Agreement with YOUR template format + filled data
+
+
+PLACEHOLDER FORMATS SUPPORTED:
+-------------------------------
+- [Field Name]
+- [FIELD NAME]
+- {{fieldName}}
+- {fieldName}
+- __Field Name__
+- Field Name: _______
+- Field Name: ........
+- Blank spaces after labels
+
+
+INSTALLATION REQUIRED:
+----------------------
+Run this command in your project directory:
+
+  npm install
+
+This will install the new jszip dependency.
+
+
+TESTING:
+--------
+1. Start the dev server: npm run dev
+2. Upload a sale deed (PDF/DOCX)
+3. Upload YOUR agreement template (DOCX with placeholders)
+4. Fill in transaction details
+5. Review extracted data
+6. Click "Download Agreement Document"
+7. Open the downloaded DOCX
+8. ✓ Should have YOUR template structure
+9. ✓ Should have all placeholders filled
+10. ✓ Should preserve formatting, fonts, Telugu/Hindi text
+
+
+EXAMPLE TEMPLATE PLACEHOLDERS:
+-------------------------------
+Your template should have placeholders like:
+
+  Buyer Name: [Buyer Name]
+  Seller Name: [Seller Name]
+  Father Name: [Buyer Father Name]
+  Address: [Buyer Address]
+  
+  Property Details:
+  Survey Number: [Survey Number]
+  Village: [Village]
+  Mandal: [Mandal]
+  District: [District]
+  
+  Financial Terms:
+  Total Amount: [Total Amount]
+  Advance: [Advance Amount]
+  Balance: [Balance Amount]
+
+The AI will automatically find these and replace them with actual values.
+
+
+KEY DIFFERENCES FROM BEFORE:
+-----------------------------
+BEFORE (WRONG):
+  Template → Extract text → AI fills text → Create NEW DOCX → Generic output
+
+NOW (CORRECT):
+  Template → Keep structure → AI maps placeholders → Replace in XML → Same template with data
+
+
+═══════════════════════════════════════════════════════════════════════════════
