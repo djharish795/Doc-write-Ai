@@ -52,13 +52,109 @@ export async function POST(req: NextRequest) {
 
     console.log(`[extract-data] AI extracting from ${mimeType} (${(sizeBytes / 1024).toFixed(1)} KB)`);
 
-    const prompt = `You are an expert in Indian legal documents — sale deeds written in Telugu, Hindi, or English.
+    const prompt = `You are a Senior Indian Property Law Expert and Document Data Extraction Specialist.
 
 Extract EVERY detail from this sale deed. Do not skip, summarize, or paraphrase anything.
-Translate Telugu/Hindi text to English accurately.
+Translate Telugu/Hindi/Kannada/Tamil text to English accurately.
 
-Return ONLY a valid JSON object with this exact structure:
+Return ONLY a valid JSON object with this exact structure (use null or empty string for missing fields, do NOT fabricate data):
 {
+  "parties": {
+    "seller": {
+      "fullName": "",
+      "fatherOrHusbandName": "",
+      "age": "",
+      "address": "",
+      "aadhaar": "",
+      "pan": ""
+    },
+    "buyer": {
+      "fullName": "",
+      "fatherOrHusbandName": "",
+      "age": "",
+      "address": "",
+      "aadhaar": "",
+      "pan": ""
+    },
+    "powerOfAttorneyHolder": null,
+    "witnesses": []
+  },
+  "property": {
+    "surveyNumber": "",
+    "subDivisionNumber": "",
+    "plotNumber": "",
+    "doorNumber": "",
+    "ward": "",
+    "block": "",
+    "village": "",
+    "mandal": "",
+    "district": "",
+    "state": "",
+    "pincode": "",
+    "fullAddress": "",
+    "propertyType": "",
+    "totalAreaAcres": "",
+    "totalAreaCents": "",
+    "totalAreaSqYards": "",
+    "totalAreaSqFeet": "",
+    "totalAreaSqMeters": "",
+    "extentBeingSold": "",
+    "boundaries": {
+      "north": "",
+      "south": "",
+      "east": "",
+      "west": ""
+    },
+    "schedule": "",
+    "pattaNumber": "",
+    "revenueVillage": "",
+    "localBodyName": ""
+  },
+  "transaction": {
+    "saleConsiderationTotal": "",
+    "saleConsiderationInWords": "",
+    "advanceAmountPaid": "",
+    "advancePaidOn": "",
+    "balanceAmount": "",
+    "balancePaymentDeadline": "",
+    "paymentMode": "",
+    "chequeOrDdDetails": ""
+  },
+  "registration": {
+    "previousDeedNumber": "",
+    "previousDeedDate": "",
+    "registrationOffice": "",
+    "bookNumber": "",
+    "executionDate": "",
+    "registrationDate": ""
+  },
+  "encumbrance": {
+    "anyLoanOrMortgage": false,
+    "loanDetails": "",
+    "nocDetails": ""
+  },
+  "apartment": {
+    "projectName": "",
+    "builderName": "",
+    "flatNumber": "",
+    "floorNumber": "",
+    "towerOrBlock": "",
+    "undividedShare": "",
+    "carpetArea": "",
+    "superBuiltupArea": "",
+    "carParkingNumber": ""
+  },
+  "government": {
+    "auctionNumber": "",
+    "lotNumber": "",
+    "governmentOrderNumber": "",
+    "allottedDate": ""
+  },
+  "additionalClauses": [],
+  "specialConditions": "",
+  "rawScheduleText": "",
+  "extractionNotes": "",
+
   "buyerName": "",
   "buyerFatherName": "",
   "buyerAddress": "",
@@ -86,7 +182,9 @@ Return ONLY a valid JSON object with this exact structure:
   "registrationDate": "",
   "witnesses": [],
   "additionalDetails": ""
-}`;
+}
+
+IMPORTANT: Populate BOTH the nested structure (parties/property/transaction/etc.) AND the flat top-level fields (buyerName, sellerName, surveyNumber, etc.) — the flat fields must mirror the nested values for backward compatibility.`;
 
     let extractedData: any;
 
@@ -104,6 +202,42 @@ Return ONLY a valid JSON object with this exact structure:
       extractedData = parseAIJson(aiText);
     }
 
+    // Normalize: ensure flat top-level fields are populated from nested structure
+    // (AI may fill nested but not flat, or vice versa — we reconcile both)
+    if (extractedData) {
+      const p = extractedData.parties || {};
+      const prop = extractedData.property || {};
+      const tx = extractedData.transaction || {};
+      const reg = extractedData.registration || {};
+
+      // Flat fields ← nested (only if flat is empty)
+      if (!extractedData.buyerName && p.buyer?.fullName) extractedData.buyerName = p.buyer.fullName;
+      if (!extractedData.buyerFatherName && p.buyer?.fatherOrHusbandName) extractedData.buyerFatherName = p.buyer.fatherOrHusbandName;
+      if (!extractedData.buyerAddress && p.buyer?.address) extractedData.buyerAddress = p.buyer.address;
+      if (!extractedData.sellerName && p.seller?.fullName) extractedData.sellerName = p.seller.fullName;
+      if (!extractedData.sellerFatherName && p.seller?.fatherOrHusbandName) extractedData.sellerFatherName = p.seller.fatherOrHusbandName;
+      if (!extractedData.sellerAddress && p.seller?.address) extractedData.sellerAddress = p.seller.address;
+      if (!extractedData.surveyNumber && prop.surveyNumber) extractedData.surveyNumber = prop.surveyNumber;
+      if (!extractedData.village && prop.village) extractedData.village = prop.village;
+      if (!extractedData.mandal && prop.mandal) extractedData.mandal = prop.mandal;
+      if (!extractedData.district && prop.district) extractedData.district = prop.district;
+      if (!extractedData.state && prop.state) extractedData.state = prop.state;
+      if (!extractedData.landSize && prop.extentBeingSold) extractedData.landSize = prop.extentBeingSold;
+      if (!extractedData.boundaries && prop.boundaries) extractedData.boundaries = prop.boundaries;
+      if (!extractedData.saleAmount && tx.saleConsiderationTotal) extractedData.saleAmount = tx.saleConsiderationTotal;
+      if (!extractedData.advanceAmount && tx.advanceAmountPaid) extractedData.advanceAmount = tx.advanceAmountPaid;
+      if (!extractedData.balanceAmount && tx.balanceAmount) extractedData.balanceAmount = tx.balanceAmount;
+      if (!extractedData.registrationDate && reg.registrationDate) extractedData.registrationDate = reg.registrationDate;
+      if (!extractedData.propertyDescription && prop.schedule) extractedData.propertyDescription = prop.schedule;
+
+      // Nested ← flat (only if nested is empty)
+      if (!p.buyer) extractedData.parties = { ...extractedData.parties, buyer: {} };
+      if (!extractedData.parties?.buyer?.fullName && extractedData.buyerName)
+        extractedData.parties.buyer.fullName = extractedData.buyerName;
+      if (!extractedData.parties?.seller?.fullName && extractedData.sellerName)
+        extractedData.parties.seller.fullName = extractedData.sellerName;
+    }
+
     // Cache raw extraction
     setCachedResult(docHash, extractedData);
 
@@ -114,7 +248,14 @@ Return ONLY a valid JSON object with this exact structure:
     const warnings: string[] = [];
     ["buyerName", "sellerName", "surveyNumber"].forEach((f) => {
       if (!finalData[f] || String(finalData[f]).trim() === "") {
-        warnings.push(`Missing: ${f}`);
+        // Also check nested structure before warning
+        const nested = f === "buyerName" ? finalData.parties?.buyer?.fullName
+          : f === "sellerName" ? finalData.parties?.seller?.fullName
+          : f === "surveyNumber" ? finalData.property?.surveyNumber
+          : null;
+        if (!nested || String(nested).trim() === "") {
+          warnings.push(`Missing: ${f}`);
+        }
       }
     });
 

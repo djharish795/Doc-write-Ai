@@ -269,48 +269,180 @@ async function buildDocxFromParagraphs(title: string, paragraphs: string[]): Pro
 
 function buildDirectMapping(data: Record<string, any>): Record<string, string> {
   const fmt = (n: any) => (n ? `₹${Number(n).toLocaleString("en-IN")}` : "");
+
+  // Helper: resolve value from flat field OR nested path
+  const get = (flatKey: string, ...nestedPath: string[]): string => {
+    if (data[flatKey] && String(data[flatKey]).trim()) return String(data[flatKey]);
+    let cur: any = data;
+    for (const k of nestedPath) { cur = cur?.[k]; }
+    return cur ? String(cur) : "";
+  };
+
+  const sellerName    = get("sellerName",    "parties", "seller", "fullName");
+  const buyerName     = get("buyerName",     "parties", "buyer",  "fullName");
+  const sellerFather  = get("sellerFatherName", "parties", "seller", "fatherOrHusbandName");
+  const buyerFather   = get("buyerFatherName",  "parties", "buyer",  "fatherOrHusbandName");
+  const sellerAddress = get("sellerAddress", "parties", "seller", "address");
+  const buyerAddress  = get("buyerAddress",  "parties", "buyer",  "address");
+  const surveyNumber  = get("surveyNumber",  "property", "surveyNumber");
+  const village       = get("village",       "property", "village");
+  const mandal        = get("mandal",        "property", "mandal");
+  const district      = get("district",      "property", "district");
+  const state         = get("state",         "property", "state");
+  const landSize      = get("landSize",      "property", "extentBeingSold") || get("landSize", "property", "totalAreaAcres");
+  const propDesc      = get("propertyDescription", "property", "schedule") || get("propertyDescription", "property", "fullAddress");
+  const saleAmt       = get("saleAmount",    "transaction", "saleConsiderationTotal");
+  const advAmt        = get("advanceAmount", "transaction", "advanceAmountPaid");
+  const balAmt        = get("balanceAmount", "transaction", "balanceAmount");
+  const regDate       = get("registrationDate", "registration", "registrationDate");
+
+  // Boundaries
+  const b = data.boundaries || data.property?.boundaries || {};
+
   return {
-    "[Buyer Name]": data.buyerName || "",
-    "[Seller Name]": data.sellerName || "",
-    "[Buyer Father Name]": data.buyerFatherName || "",
-    "[Seller Father Name]": data.sellerFatherName || "",
-    "[Buyer Address]": data.buyerAddress || "",
-    "[Seller Address]": data.sellerAddress || "",
-    "[Property Description]": data.propertyDescription || "",
-    "[Survey Number]": data.surveyNumber || "",
-    "[Village]": data.village || "",
-    "[Mandal]": data.mandal || "",
-    "[District]": data.district || "",
-    "[Land Size]": data.landSize || "",
-    "[Total Amount]": fmt(data.totalAmount),
-    "[Advance Amount]": fmt(data.advanceAmount),
-    "[Balance Amount]": fmt(data.balanceAmount),
-    "[Transaction Number]": data.transactionNumber || "",
-    "[Date]": data.agreementDate || "",
+    // Parties
+    "[Buyer Name]":         buyerName,
+    "[Seller Name]":        sellerName,
+    "[Buyer Father Name]":  buyerFather,
+    "[Seller Father Name]": sellerFather,
+    "[Buyer Address]":      buyerAddress,
+    "[Seller Address]":     sellerAddress,
+    "[Buyer Age]":          get("buyerAge",  "parties", "buyer",  "age"),
+    "[Seller Age]":         get("sellerAge", "parties", "seller", "age"),
+    "[Buyer Aadhaar]":      get("buyerAadhaar", "parties", "buyer",  "aadhaar"),
+    "[Seller Aadhaar]":     get("sellerAadhaar","parties", "seller", "aadhaar"),
+    "[Buyer PAN]":          get("buyerPan",  "parties", "buyer",  "pan"),
+    "[Seller PAN]":         get("sellerPan", "parties", "seller", "pan"),
+
+    // Property
+    "[Property Description]": propDesc,
+    "[Survey Number]":        surveyNumber,
+    "[Sub Division Number]":  get("subDivisionNumber", "property", "subDivisionNumber"),
+    "[Plot Number]":          get("plotNumber",  "property", "plotNumber"),
+    "[Door Number]":          get("doorNumber",  "property", "doorNumber"),
+    "[Village]":              village,
+    "[Mandal]":               mandal,
+    "[District]":             district,
+    "[State]":                state,
+    "[Pincode]":              get("pincode",     "property", "pincode"),
+    "[Land Size]":            landSize,
+    "[Land Size Unit]":       get("landSizeUnit","property", "totalAreaAcres") ? "Acres" : "",
+    "[Patta Number]":         get("pattaNumber", "property", "pattaNumber"),
+    "[Revenue Village]":      get("revenueVillage","property","revenueVillage"),
+    "[Local Body]":           get("localBodyName","property","localBodyName"),
+    "[Schedule]":             get("rawScheduleText") || get("propertyDescription","property","schedule"),
+    "[North Boundary]":       b.north  || "",
+    "[South Boundary]":       b.south  || "",
+    "[East Boundary]":        b.east   || "",
+    "[West Boundary]":        b.west   || "",
+
+    // Transaction
+    "[Total Amount]":         fmt(saleAmt  || data.totalAmount),
+    "[Advance Amount]":       fmt(advAmt   || data.advanceAmount),
+    "[Balance Amount]":       fmt(balAmt   || data.balanceAmount),
+    "[Sale Amount In Words]": get("saleConsiderationInWords","transaction","saleConsiderationInWords"),
+    "[Advance Paid On]":      get("advancePaidOn","transaction","advancePaidOn"),
+    "[Balance Deadline]":     get("balancePaymentDeadline","transaction","balancePaymentDeadline"),
+    "[Payment Mode]":         get("paymentMode","transaction","paymentMode"),
+    "[Cheque DD Details]":    get("chequeOrDdDetails","transaction","chequeOrDdDetails"),
+    "[Transaction Number]":   data.transactionNumber || "",
+    "[Date]":                 data.agreementDate || "",
+
+    // Registration
+    "[Registration Number]":  get("registrationNumber","registration","previousDeedNumber"),
+    "[Registration Date]":    regDate,
+    "[Registration Office]":  get("registrationOffice","registration","registrationOffice"),
+    "[Execution Date]":       get("executionDate","registration","executionDate"),
+
+    // Apartment
+    "[Project Name]":         get("projectName",  "apartment","projectName"),
+    "[Builder Name]":         get("builderName",  "apartment","builderName"),
+    "[Flat Number]":          get("flatNumber",   "apartment","flatNumber"),
+    "[Floor Number]":         get("floorNumber",  "apartment","floorNumber"),
+    "[Tower Block]":          get("towerOrBlock", "apartment","towerOrBlock"),
+    "[Undivided Share]":      get("undividedShare","apartment","undividedShare"),
+    "[Carpet Area]":          get("carpetArea",   "apartment","carpetArea"),
+    "[Super Builtup Area]":   get("superBuiltupArea","apartment","superBuiltupArea"),
+    "[Car Parking]":          get("carParkingNumber","apartment","carParkingNumber"),
+
+    // Government
+    "[Auction Number]":       get("auctionNumber","government","auctionNumber"),
+    "[Lot Number]":           get("lotNumber",    "government","lotNumber"),
+    "[GO Number]":            get("governmentOrderNumber","government","governmentOrderNumber"),
+    "[Allotted Date]":        get("allottedDate", "government","allottedDate"),
   };
 }
 
 function applyDirectReplacements(xml: string, data: Record<string, any>): string {
   const fmt = (n: any) => (n ? `₹${Number(n).toLocaleString("en-IN")}` : "");
-  const map: Record<string, string> = {
-    "\\[Buyer Name\\]": data.buyerName,
-    "\\[Seller Name\\]": data.sellerName,
-    "\\[Buyer Father Name\\]": data.buyerFatherName,
-    "\\[Seller Father Name\\]": data.sellerFatherName,
-    "\\[Buyer Address\\]": data.buyerAddress,
-    "\\[Seller Address\\]": data.sellerAddress,
-    "\\[Property Description\\]": data.propertyDescription,
-    "\\[Survey Number\\]": data.surveyNumber,
-    "\\[Village\\]": data.village,
-    "\\[Mandal\\]": data.mandal,
-    "\\[District\\]": data.district,
-    "\\[Land Size\\]": data.landSize,
-    "\\[Total Amount\\]": fmt(data.totalAmount),
-    "\\[Advance Amount\\]": fmt(data.advanceAmount),
-    "\\[Balance Amount\\]": fmt(data.balanceAmount),
-    "\\[Transaction Number\\]": data.transactionNumber,
-    "\\[Date\\]": data.agreementDate,
+
+  // Resolve nested or flat
+  const get = (flatKey: string, ...nestedPath: string[]): string => {
+    if (data[flatKey] && String(data[flatKey]).trim()) return String(data[flatKey]);
+    let cur: any = data;
+    for (const k of nestedPath) { cur = cur?.[k]; }
+    return cur ? String(cur) : "";
   };
+
+  const b = data.boundaries || data.property?.boundaries || {};
+
+  const map: Record<string, string> = {
+    "\\[Buyer Name\\]":         get("buyerName",    "parties","buyer","fullName"),
+    "\\[Seller Name\\]":        get("sellerName",   "parties","seller","fullName"),
+    "\\[Buyer Father Name\\]":  get("buyerFatherName","parties","buyer","fatherOrHusbandName"),
+    "\\[Seller Father Name\\]": get("sellerFatherName","parties","seller","fatherOrHusbandName"),
+    "\\[Buyer Address\\]":      get("buyerAddress", "parties","buyer","address"),
+    "\\[Seller Address\\]":     get("sellerAddress","parties","seller","address"),
+    "\\[Buyer Age\\]":          get("buyerAge",     "parties","buyer","age"),
+    "\\[Seller Age\\]":         get("sellerAge",    "parties","seller","age"),
+    "\\[Buyer Aadhaar\\]":      get("buyerAadhaar", "parties","buyer","aadhaar"),
+    "\\[Seller Aadhaar\\]":     get("sellerAadhaar","parties","seller","aadhaar"),
+    "\\[Buyer PAN\\]":          get("buyerPan",     "parties","buyer","pan"),
+    "\\[Seller PAN\\]":         get("sellerPan",    "parties","seller","pan"),
+    "\\[Property Description\\]": get("propertyDescription","property","schedule"),
+    "\\[Survey Number\\]":      get("surveyNumber", "property","surveyNumber"),
+    "\\[Sub Division Number\\]":get("subDivisionNumber","property","subDivisionNumber"),
+    "\\[Plot Number\\]":        get("plotNumber",   "property","plotNumber"),
+    "\\[Door Number\\]":        get("doorNumber",   "property","doorNumber"),
+    "\\[Village\\]":            get("village",      "property","village"),
+    "\\[Mandal\\]":             get("mandal",       "property","mandal"),
+    "\\[District\\]":           get("district",     "property","district"),
+    "\\[State\\]":              get("state",        "property","state"),
+    "\\[Pincode\\]":            get("pincode",      "property","pincode"),
+    "\\[Land Size\\]":          get("landSize",     "property","extentBeingSold"),
+    "\\[Patta Number\\]":       get("pattaNumber",  "property","pattaNumber"),
+    "\\[Revenue Village\\]":    get("revenueVillage","property","revenueVillage"),
+    "\\[Local Body\\]":         get("localBodyName","property","localBodyName"),
+    "\\[North Boundary\\]":     b.north  || "",
+    "\\[South Boundary\\]":     b.south  || "",
+    "\\[East Boundary\\]":      b.east   || "",
+    "\\[West Boundary\\]":      b.west   || "",
+    "\\[Total Amount\\]":       fmt(get("saleAmount","transaction","saleConsiderationTotal") || data.totalAmount),
+    "\\[Advance Amount\\]":     fmt(get("advanceAmount","transaction","advanceAmountPaid") || data.advanceAmount),
+    "\\[Balance Amount\\]":     fmt(get("balanceAmount","transaction","balanceAmount") || data.balanceAmount),
+    "\\[Sale Amount In Words\\]": get("saleConsiderationInWords","transaction","saleConsiderationInWords"),
+    "\\[Payment Mode\\]":       get("paymentMode","transaction","paymentMode"),
+    "\\[Cheque DD Details\\]":  get("chequeOrDdDetails","transaction","chequeOrDdDetails"),
+    "\\[Transaction Number\\]": data.transactionNumber || "",
+    "\\[Date\\]":               data.agreementDate || "",
+    "\\[Registration Number\\]":get("registrationNumber","registration","previousDeedNumber"),
+    "\\[Registration Date\\]":  get("registrationDate","registration","registrationDate"),
+    "\\[Registration Office\\]":get("registrationOffice","registration","registrationOffice"),
+    "\\[Project Name\\]":       get("projectName",  "apartment","projectName"),
+    "\\[Builder Name\\]":       get("builderName",  "apartment","builderName"),
+    "\\[Flat Number\\]":        get("flatNumber",   "apartment","flatNumber"),
+    "\\[Floor Number\\]":       get("floorNumber",  "apartment","floorNumber"),
+    "\\[Tower Block\\]":        get("towerOrBlock", "apartment","towerOrBlock"),
+    "\\[Undivided Share\\]":    get("undividedShare","apartment","undividedShare"),
+    "\\[Carpet Area\\]":        get("carpetArea",   "apartment","carpetArea"),
+    "\\[Super Builtup Area\\]": get("superBuiltupArea","apartment","superBuiltupArea"),
+    "\\[Car Parking\\]":        get("carParkingNumber","apartment","carParkingNumber"),
+    "\\[Auction Number\\]":     get("auctionNumber","government","auctionNumber"),
+    "\\[Lot Number\\]":         get("lotNumber",    "government","lotNumber"),
+    "\\[GO Number\\]":          get("governmentOrderNumber","government","governmentOrderNumber"),
+    "\\[Allotted Date\\]":      get("allottedDate", "government","allottedDate"),
+  };
+
   let result = xml;
   for (const [pattern, value] of Object.entries(map)) {
     if (value) result = result.replace(new RegExp(pattern, "gi"), escapeXml(String(value)));

@@ -127,12 +127,26 @@ export default function Home() {
           setLoadingText("Property details extracted successfully!");
 
           // Pre-fill seller details from extracted data if available
-          if (result.data.sellerName) {
+          if (result.data.sellerName || result.data.parties?.seller?.fullName) {
+            const d = result.data;
+            const seller = d.parties?.seller || {};
+            const buyer  = d.parties?.buyer  || {};
+            const tx     = d.transaction     || {};
+
             setTxDetails((prev) => ({
               ...prev,
-              sellerName: result.data.sellerName || prev.sellerName,
-              sellerFatherName: result.data.sellerFatherName || prev.sellerFatherName,
-              sellerAddress: result.data.sellerAddress || prev.sellerAddress,
+              // Seller — flat field takes priority, fall back to nested
+              sellerName:       d.sellerName       || seller.fullName          || prev.sellerName,
+              sellerFatherName: d.sellerFatherName  || seller.fatherOrHusbandName || prev.sellerFatherName,
+              sellerAddress:    d.sellerAddress     || seller.address           || prev.sellerAddress,
+              // Buyer — pre-fill if extracted (user can override in Step 3)
+              buyerName:        d.buyerName         || buyer.fullName           || prev.buyerName,
+              buyerFatherName:  d.buyerFatherName   || buyer.fatherOrHusbandName || prev.buyerFatherName,
+              buyerAddress:     d.buyerAddress      || buyer.address            || prev.buyerAddress,
+              // Transaction amounts — pre-fill if found in deed
+              totalAmount:      d.saleAmount        || tx.saleConsiderationTotal || prev.totalAmount,
+              advanceAmount:    d.advanceAmount      || tx.advanceAmountPaid     || prev.advanceAmount,
+              balanceAmount:    d.balanceAmount      || tx.balanceAmount         || prev.balanceAmount,
             }));
           }
         } else {
@@ -249,20 +263,44 @@ export default function Home() {
     // If extraction already completed at Step 1, just merge user inputs and proceed
     if (extractionStatus === "completed" && extractedData) {
       const merged = {
+        // Spread all extracted data (includes nested parties/property/transaction/etc.)
         ...extractedData,
-        // User inputs always override extracted data
-        buyerName: txDetails.buyerName || extractedData.buyerName,
-        buyerFatherName: txDetails.buyerFatherName || extractedData.buyerFatherName,
-        buyerAddress: txDetails.buyerAddress || extractedData.buyerAddress,
-        sellerName: txDetails.sellerName || extractedData.sellerName,
+        // User inputs always override extracted data (flat fields)
+        buyerName:        txDetails.buyerName        || extractedData.buyerName,
+        buyerFatherName:  txDetails.buyerFatherName  || extractedData.buyerFatherName,
+        buyerAddress:     txDetails.buyerAddress     || extractedData.buyerAddress,
+        sellerName:       txDetails.sellerName       || extractedData.sellerName,
         sellerFatherName: txDetails.sellerFatherName || extractedData.sellerFatherName,
-        sellerAddress: txDetails.sellerAddress || extractedData.sellerAddress,
-        agreementDate: txDetails.agreementDate,
-        totalAmount: txDetails.totalAmount,
-        advanceAmount: txDetails.advanceAmount,
-        balanceAmount: txDetails.balanceAmount,
+        sellerAddress:    txDetails.sellerAddress    || extractedData.sellerAddress,
+        agreementDate:    txDetails.agreementDate,
+        totalAmount:      txDetails.totalAmount,
+        advanceAmount:    txDetails.advanceAmount,
+        balanceAmount:    txDetails.balanceAmount,
         transactionNumber: txDetails.transactionNumber,
-        propertyType: txDetails.propertyType,
+        propertyType:     txDetails.propertyType,
+        // Also update nested parties so generate-report can use either path
+        parties: {
+          ...extractedData.parties,
+          buyer: {
+            ...extractedData.parties?.buyer,
+            fullName:            txDetails.buyerName        || extractedData.parties?.buyer?.fullName,
+            fatherOrHusbandName: txDetails.buyerFatherName  || extractedData.parties?.buyer?.fatherOrHusbandName,
+            address:             txDetails.buyerAddress     || extractedData.parties?.buyer?.address,
+          },
+          seller: {
+            ...extractedData.parties?.seller,
+            fullName:            txDetails.sellerName       || extractedData.parties?.seller?.fullName,
+            fatherOrHusbandName: txDetails.sellerFatherName || extractedData.parties?.seller?.fatherOrHusbandName,
+            address:             txDetails.sellerAddress    || extractedData.parties?.seller?.address,
+          },
+        },
+        // Also update nested transaction
+        transaction: {
+          ...extractedData.transaction,
+          saleConsiderationTotal: txDetails.totalAmount   || extractedData.transaction?.saleConsiderationTotal,
+          advanceAmountPaid:      txDetails.advanceAmount || extractedData.transaction?.advanceAmountPaid,
+          balanceAmount:          txDetails.balanceAmount || extractedData.transaction?.balanceAmount,
+        },
       };
       setExtractedData(merged);
       setStep(5);
@@ -285,12 +323,18 @@ export default function Home() {
         body: JSON.stringify({
           pdfUrl: deedBase64,
           userInputs: {
-            buyerName: txDetails.buyerName,
-            sellerName: txDetails.sellerName,
-            advanceAmount: txDetails.advanceAmount,
-            totalAmount: txDetails.totalAmount,
-            agreementDate: txDetails.agreementDate,
-            propertyType: txDetails.propertyType,
+            buyerName:        txDetails.buyerName,
+            buyerFatherName:  txDetails.buyerFatherName,
+            buyerAddress:     txDetails.buyerAddress,
+            sellerName:       txDetails.sellerName,
+            sellerFatherName: txDetails.sellerFatherName,
+            sellerAddress:    txDetails.sellerAddress,
+            advanceAmount:    txDetails.advanceAmount,
+            totalAmount:      txDetails.totalAmount,
+            balanceAmount:    txDetails.balanceAmount,
+            agreementDate:    txDetails.agreementDate,
+            transactionNumber: txDetails.transactionNumber,
+            propertyType:     txDetails.propertyType,
           },
         }),
       });
