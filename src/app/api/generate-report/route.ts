@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { askAI, askAIWithDocument, parseAIJson } from "@/lib/aiService";
 import JSZip from "jszip";
-import {
-  Document, Packer, Paragraph, TextRun,
-  HeadingLevel, AlignmentType, BorderStyle,
-  Table, TableRow, TableCell, WidthType,
-} from "docx";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 
 export async function POST(req: NextRequest): Promise<Response> {
   try {
@@ -15,41 +11,39 @@ export async function POST(req: NextRequest): Promise<Response> {
     const extractedDeedData = body.extractedDeedData || body.data || {};
     const userInputs = body.userInputs || body.data || {};
     const agreementType = body.agreementType || "direct_owner_sale";
-    const fieldSchema = body.fieldSchema || [];
     const existingValues = body.existingValues || [];
 
-    // Merge data — user inputs always override extracted deed data
+    // Merge — user inputs always override extracted deed data
     const mergedData = deepMerge(extractedDeedData, userInputs);
-
-    let docxBuffer: Buffer;
     const safeName = sanitize(mergedData.buyerName || "Agreement");
 
+    let docxBuffer: Buffer;
+
     if (!template) {
-      // ── No template: build DOCX from data ──────────────────────────────
-      console.log("[generate-report] No template — building DOCX from data");
-      docxBuffer = await buildDocxFromData(mergedData);
+      // No template uploaded — Claude drafts the full agreement from scratch
+      console.log("[generate-report] No template — Claude drafting agreement from data");
+      docxBuffer = await claudeDraftDocx(mergedData, agreementType);
 
     } else {
-      // ── Template provided: detect type ─────────────────────────────────
       const mimeMatch = template.match(/^data:([^;]+);base64,/);
       const mime = mimeMatch ? mimeMatch[1] : "";
       const base64Data = template.includes(",") ? template.split(",")[1] : template;
       const buffer = Buffer.from(base64Data, "base64");
 
-      // Check magic bytes: DOCX/ZIP starts with PK (0x50 0x4B)
+      // DOCX: magic bytes PK (0x50 0x4B)
       const isDocx =
         (buffer[0] === 0x50 && buffer[1] === 0x4B) ||
         mime.includes("wordprocessingml") ||
         mime.includes("msword");
 
       if (isDocx) {
-        // ── DOCX template: fill placeholders in XML ─────────────────────
-        console.log("[generate-report] DOCX template — filling placeholders");
+        // DOCX template — fill placeholders in XML using Claude
+        console.log("[generate-report] DOCX template — Claude filling placeholders");
         docxBuffer = await fillDocxTemplate(buffer, mergedData);
       } else {
-        // ── PDF / Image template: AI reads it, builds DOCX ─────────────
-        console.log(`[generate-report] ${mime} template — AI reading and building DOCX`);
-        docxBuffer = await buildDocxFromNonDocxTemplate(base64Data, mime, mergedData, agreementType, existingValues);
+        // PDF or Image template — Claude reads it and fills it
+        console.log(`[generate-report] ${mime} template — Claude reading and filling`);
+        docxBuffer = await claudeFillFromVisualTemplate(base64Data, mime, mergedData, agreementType, existingValues);
       }
     }
 
@@ -70,38 +64,35 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 }
 
-// ─── Path 1: Fill DOCX template (XML manipulation) ───────────────────────────
+// ─── Path 1: DOCX template — fill placeholders in XML ────────────────────────
 
-async function fillDocxTemplate(
-  buffer: Buffer,
-  data: Record<string, any>
-): Promise<Buffer> {
+async function fillDocxTemplate(buffer: Buffer, data: Record<string, any>): Promise<Buffer> {
   const zip = await JSZip.loadAsync(buffer);
   const documentXml = await zip.file("word/document.xml")?.async("string");
   if (!documentXml) throw new Error("Invalid DOCX — missing document.xml");
 
-  // Extract plain text for AI to read
   const mammoth = await import("mammoth");
   const { value: templateText } = await mammoth.extractRawText({ buffer });
 
-  // Ask Gemini to map every placeholder → value
   const prompt = `You are filling an Indian legal agreement template with real data.
 
-TEMPLATE TEXT:
+TEMPLATE TEXT (exact content of the uploaded document):
 ${templateText}
 
-DATA:
+DATA TO FILL IN:
 ${JSON.stringify(data, null, 2)}
 
-TASK:
-- Find every placeholder: [Field Name], \${field}, blank lines after labels like "Buyer Name: ___"
+INSTRUCTIONS:
+- Identify every placeholder in the template: [Field Name], \${field}, blank lines after labels, underscores like "______"
 - Map each placeholder EXACTLY as it appears in the template to the correct value from the data
 - Format amounts as ₹X,XX,XXX (Indian number format)
-- If no matching data exists, keep the placeholder as-is
+- If no matching data exists for a placeholder, keep the placeholder text as-is
+- Do NOT invent or fabricate any data
 
-Return ONLY a valid JSON object mapping placeholder → value. No markdown, no explanation.`;
+Return ONLY a valid JSON object mapping each placeholder to its replacement value.
+Example: { "[Buyer Name]": "SURESH", "[Survey Number]": "123/4A", "[Total Amount]": "₹3,00,000" }`;
 
-  let replacementMap: Record<string, string>;
+  let replacementMap: Record<string, string> = {};
   try {
     const aiText = await askAI(prompt);
     replacementMap = parseAIJson(aiText);
@@ -109,7 +100,6 @@ Return ONLY a valid JSON object mapping placeholder → value. No markdown, no e
     replacementMap = buildDirectMapping(data);
   }
 
-  // Replace in XML
   let modifiedXml = documentXml;
   for (const [placeholder, value] of Object.entries(replacementMap)) {
     if (value) {
@@ -119,158 +109,103 @@ Return ONLY a valid JSON object mapping placeholder → value. No markdown, no e
       );
     }
   }
-
-  // Safety net: direct replacements
   modifiedXml = applyDirectReplacements(modifiedXml, data);
 
   zip.file("word/document.xml", modifiedXml);
   return await zip.generateAsync({ type: "nodebuffer" });
 }
 
-// ─── Path 2: PDF/Image template → AI reads → build DOCX ─────────────────────
+// ─── Path 2: PDF/Image template — Claude reads visually and fills ─────────────
 
-async function buildDocxFromNonDocxTemplate(
+async function claudeFillFromVisualTemplate(
   base64Data: string,
   mimeType: string,
   data: Record<string, any>,
   agreementType: string,
   existingValues: any[]
 ): Promise<Buffer> {
-  const fmt = (n: any) => (n ? `₹${Number(n).toLocaleString("en-IN")}` : "");
-
   const prompt = `You are an expert Indian Property Law Document Drafter.
 
-You are given a reference agreement template (as ${mimeType.includes("pdf") ? "PDF" : "image"}) and data to fill into it.
+You are given the REFERENCE AGREEMENT TEMPLATE as a ${mimeType.includes("pdf") ? "PDF" : "image"}.
+Your job is to produce a COMPLETE, FILLED agreement document based on this template.
 
-Agreement type: ${agreementType}
-
-DATA TO USE:
+NEW TRANSACTION DATA:
 ${JSON.stringify(data, null, 2)}
 
-OLD VALUES TO REPLACE (if present in template):
+OLD VALUES TO REPLACE (from the template):
 ${JSON.stringify(existingValues || [])}
 
-TASK:
-1. Read the template carefully — understand its structure, clauses, and legal language
-2. Produce the COMPLETE filled agreement as plain text paragraphs
-3. Replace all placeholders and old values with the new data
-4. Preserve ALL legal boilerplate, clauses, recitals VERBATIM
-5. Write boundaries (East/West/North/South) as labeled lines, NOT tables
-6. For missing data, write [TO BE FILLED]
-7. User-provided data takes priority over anything in the template
+CRITICAL INSTRUCTIONS:
+1. Read the template CAREFULLY — understand every clause, paragraph, and legal language
+2. Reproduce the EXACT same document structure and legal text from the template
+3. Replace ALL old names, amounts, dates, survey numbers with the new data provided
+4. Keep ALL legal boilerplate, recitals, conditions, and clauses VERBATIM from the template
+5. Write the document as flowing paragraphs — NOT as bullet points or tables
+6. Boundaries (East/West/North/South) should appear as natural prose within the schedule paragraph
+7. Do NOT add any new clauses or remove any existing ones
+8. If data is missing, write the field label followed by a blank line
 
-OUTPUT FORMAT — Return ONLY a JSON object:
+Return ONLY a JSON object:
 {
-  "title": "SALE AGREEMENT",
+  "title": "exact title from template",
   "paragraphs": [
-    "This Agreement for Sale of Land is made on DATE...",
-    "PARTIES:",
-    "Seller: NAME, S/o FATHER, residing at ADDRESS",
-    "Buyer: NAME, S/o FATHER, residing at ADDRESS",
-    "PROPERTY DETAILS:",
-    "Survey No: VALUE, Village: VALUE, Mandal: VALUE, District: VALUE",
-    "Boundaries: East: VALUE, West: VALUE, North: VALUE, South: VALUE",
-    "Land Size: VALUE",
-    "FINANCIAL TERMS:",
-    "Total Sale Consideration: ₹VALUE",
-    "Advance Amount Paid: ₹VALUE",
-    "Balance Amount: ₹VALUE",
-    "Transaction No: VALUE",
-    "...all remaining legal clauses verbatim..."
+    "Full paragraph 1 text exactly as it should appear in the document...",
+    "Full paragraph 2 text...",
+    "..."
   ]
 }`;
 
-  let paragraphs: string[] = [];
-  let title = "SALE AGREEMENT";
+  const aiText = mimeType.includes("pdf") || mimeType.startsWith("image/")
+    ? await askAIWithDocument(prompt, base64Data, mimeType)
+    : await askAI(prompt);
 
-  try {
-    const aiText = mimeType.includes("pdf") || mimeType.startsWith("image/")
-      ? await askAIWithDocument(prompt, base64Data, mimeType)
-      : await askAI(prompt);
-
-    const parsed = parseAIJson(aiText);
-    title = parsed.title || "SALE AGREEMENT";
-    paragraphs = parsed.paragraphs || [];
-  } catch (e) {
-    console.error("[generate-report] AI failed for non-DOCX template, using data directly:", e);
-    // Build paragraphs directly from data
-    paragraphs = buildParagraphsFromData(data);
-  }
-
-  return buildDocxFromParagraphs(title, paragraphs, data);
+  const parsed = parseAIJson(aiText);
+  return buildDocxFromParagraphs(parsed.title || "SALE AGREEMENT", parsed.paragraphs || []);
 }
 
-// ─── Path 3: No template — build DOCX from data ──────────────────────────────
+// ─── Path 3: No template — Claude drafts from scratch ────────────────────────
 
-async function buildDocxFromData(data: Record<string, any>): Promise<Buffer> {
-  const paragraphs = buildParagraphsFromData(data);
-  return buildDocxFromParagraphs("SALE AGREEMENT", paragraphs, data);
+async function claudeDraftDocx(data: Record<string, any>, agreementType: string): Promise<Buffer> {
+  const fmt = (n: any) => (n ? `₹${Number(n).toLocaleString("en-IN")}` : "");
+
+  const prompt = `You are a Senior Indian Property Law Document Drafter.
+
+Draft a complete, professional Indian Sale Agreement document using the following data.
+Agreement type: ${agreementType}
+
+DATA:
+${JSON.stringify(data, null, 2)}
+
+INSTRUCTIONS:
+1. Write the document as flowing legal paragraphs — exactly like a real Indian sale deed
+2. Include all standard sections: recitals, parties, property schedule, boundaries, financial terms, conditions, attestation
+3. Use formal legal language appropriate for Indian property law
+4. Boundaries (East/West/North/South) should appear in the schedule as labeled prose lines
+5. Financial amounts should be written both in figures and words
+6. Include standard covenants: title warranty, encumbrance-free declaration, possession clause, registration cooperation
+7. Do NOT use bullet points or tables — write as continuous legal paragraphs
+8. If any data field is missing or empty, omit that detail naturally from the prose
+
+Return ONLY a JSON object:
+{
+  "title": "SALE AGREEMENT",
+  "paragraphs": [
+    "This Agreement for Sale of Land (hereinafter referred to as 'Agreement') is executed on this ${data.agreementDate || 'day'} between...",
+    "WHEREAS the Seller is the absolute owner of the property described hereunder...",
+    "NOW THEREFORE in consideration of the mutual covenants...",
+    "PARTIES: The Seller, ${data.sellerName || '[Seller Name]'}, S/o ${data.sellerFatherName || '[Father Name]'}, residing at ${data.sellerAddress || '[Address]'}...",
+    "...all remaining paragraphs with full legal text..."
+  ]
+}`;
+
+  const aiText = await askAI(prompt);
+  const parsed = parseAIJson(aiText);
+  return buildDocxFromParagraphs(parsed.title || "SALE AGREEMENT", parsed.paragraphs || []);
 }
 
-// ─── Build paragraph list from data ──────────────────────────────────────────
+// ─── Convert paragraph list → DOCX ───────────────────────────────────────────
 
-function buildParagraphsFromData(data: Record<string, any>): string[] {
-  const fmt = (n: any) => (n ? `₹${Number(n).toLocaleString("en-IN")}` : "[TO BE FILLED]");
-  const v = (val: any) => (val && String(val).trim() ? String(val) : "[TO BE FILLED]");
-
-  return [
-    `Agreement for Sale of ${v(data.propertyType || "Land")}`,
-    `Date: ${v(data.agreementDate)}`,
-    "",
-    "PARTIES",
-    "",
-    `Seller: ${v(data.sellerName)}, S/o ${v(data.sellerFatherName)}, residing at ${v(data.sellerAddress)}`,
-    "",
-    `Buyer: ${v(data.buyerName)}, S/o ${v(data.buyerFatherName)}, residing at ${v(data.buyerAddress)}`,
-    "",
-    "PROPERTY DETAILS",
-    "",
-    `Survey Number: ${v(data.surveyNumber)}`,
-    `Village: ${v(data.village)}`,
-    `Mandal: ${v(data.mandal)}`,
-    `District: ${v(data.district)}`,
-    `Land Size: ${v(data.landSize)} ${v(data.landSizeUnit || "")}`,
-    `Property Description: ${v(data.propertyDescription)}`,
-    "",
-    "BOUNDARIES",
-    "",
-    `East: ${v(data.boundaries?.east || data.east)}`,
-    `West: ${v(data.boundaries?.west || data.west)}`,
-    `North: ${v(data.boundaries?.north || data.north)}`,
-    `South: ${v(data.boundaries?.south || data.south)}`,
-    "",
-    "FINANCIAL TERMS",
-    "",
-    `Total Sale Consideration: ${fmt(data.totalAmount)}`,
-    `Advance Amount Paid: ${fmt(data.advanceAmount)}`,
-    `Balance Amount Payable: ${fmt(data.balanceAmount)}`,
-    `Transaction / Cheque / DD No: ${v(data.transactionNumber)}`,
-    "",
-    "TERMS AND CONDITIONS",
-    "",
-    "1. The Seller hereby agrees to sell and the Buyer agrees to purchase the above-described property for the total consideration mentioned above.",
-    "2. The Seller confirms that the property is free from all encumbrances, liens, and legal disputes.",
-    "3. The balance amount shall be paid at the time of execution of the final Sale Deed.",
-    "4. The Seller shall hand over all original title documents to the Buyer upon receipt of full payment.",
-    "5. Both parties agree to cooperate for registration of the Sale Deed before the Sub-Registrar.",
-    "",
-    "SIGNATURES",
-    "",
-    `Seller: ${v(data.sellerName)}`,
-    "",
-    `Buyer: ${v(data.buyerName)}`,
-    "",
-    `Generated on: ${new Date().toLocaleDateString("en-IN")}`,
-  ];
-}
-
-// ─── Convert paragraph list to DOCX buffer ───────────────────────────────────
-
-async function buildDocxFromParagraphs(
-  title: string,
-  paragraphs: string[],
-  data: Record<string, any>
-): Promise<Buffer> {
+async function buildDocxFromParagraphs(title: string, paragraphs: string[]): Promise<Buffer> {
   const children: Paragraph[] = [];
 
   // Title
@@ -283,36 +218,36 @@ async function buildDocxFromParagraphs(
     })
   );
 
-  // Body paragraphs
   for (const para of paragraphs) {
     const trimmed = para.trim();
 
     if (!trimmed) {
-      // Empty line → spacer
-      children.push(new Paragraph({ text: "", spacing: { after: 100 } }));
+      children.push(new Paragraph({ text: "", spacing: { after: 120 } }));
       continue;
     }
 
-    // Section headings (all caps, short lines)
+    // Detect section headings: all-caps, short, no numbers or rupee signs
     const isHeading =
       trimmed === trimmed.toUpperCase() &&
       trimmed.length < 60 &&
       !trimmed.includes("₹") &&
-      !trimmed.match(/^\d+\./);
+      !/^\d+\./.test(trimmed) &&
+      !/^[a-z]/.test(trimmed);
 
-    if (isHeading && trimmed.length > 2) {
+    if (isHeading) {
       children.push(
         new Paragraph({
           children: [new TextRun({ text: trimmed, bold: true, size: 24 })],
-          spacing: { before: 300, after: 150 },
+          spacing: { before: 320, after: 160 },
         })
       );
     } else {
       children.push(
         new Paragraph({
           children: [new TextRun({ text: trimmed, size: 22 })],
-          spacing: { after: 160 },
+          spacing: { after: 200 },
           alignment: AlignmentType.JUSTIFIED,
+          indent: { firstLine: 360 },
         })
       );
     }
@@ -321,9 +256,7 @@ async function buildDocxFromParagraphs(
   const doc = new Document({
     sections: [{
       properties: {
-        page: {
-          margin: { top: 1440, bottom: 1440, left: 1440, right: 1080 },
-        },
+        page: { margin: { top: 1440, bottom: 1440, left: 1440, right: 1080 } },
       },
       children,
     }],
@@ -381,24 +314,6 @@ function applyDirectReplacements(xml: string, data: Record<string, any>): string
   let result = xml;
   for (const [pattern, value] of Object.entries(map)) {
     if (value) result = result.replace(new RegExp(pattern, "gi"), escapeXml(String(value)));
-  }
-  return result;
-}
-
-function flattenObject(obj: any, prefix = "", result: Record<string, any> = {}): Record<string, any> {
-  for (const key in obj) {
-    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
-    const fullKey = prefix ? `${prefix}.${key}` : key;
-    if (obj[key] !== null && typeof obj[key] === "object" && !Array.isArray(obj[key])) {
-      flattenObject(obj[key], fullKey, result);
-      flattenObject(obj[key], "", result);
-    } else if (Array.isArray(obj[key])) {
-      result[fullKey] = obj[key].join(", ");
-      if (!result[key]) result[key] = obj[key].join(", ");
-    } else {
-      result[fullKey] = obj[key];
-      if (!result[key]) result[key] = obj[key];
-    }
   }
   return result;
 }
