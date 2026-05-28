@@ -47,11 +47,14 @@ export async function POST(req: NextRequest): Promise<Response> {
       }
     }
 
-    return new NextResponse(new Uint8Array(docxBuffer), {
+    console.log("[generate-report] Converting generated DOCX buffer to high-fidelity PDF via Playwright");
+    const pdfBuffer = await convertDocxToPdf(docxBuffer);
+
+    return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "Content-Disposition": `attachment; filename="Agreement_${safeName}.docx"`,
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="Agreement_${safeName}.pdf"`,
       },
     });
 
@@ -482,4 +485,115 @@ function escapeXml(text: string): string {
 
 function sanitize(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 40);
+}
+
+async function convertDocxToPdf(docxBuffer: Buffer): Promise<Buffer> {
+  const mammoth = await import("mammoth");
+  const { value: htmlContent } = await mammoth.convertToHtml({ buffer: docxBuffer });
+
+  // Wrap the HTML with premium CSS styling for print-ready legal document rendering
+  const styledHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+        <style>
+          @page {
+            size: A4;
+            margin: 1.25in 1.25in 1.25in 1.25in;
+          }
+          body {
+            font-family: 'Lora', 'Georgia', 'Times New Roman', serif;
+            font-size: 13pt;
+            line-height: 1.6;
+            color: #111111;
+            margin: 0;
+            padding: 0;
+            text-align: justify;
+          }
+          h1 {
+            text-align: center;
+            font-size: 18pt;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 24pt;
+            letter-spacing: 0.05em;
+          }
+          h2, h3 {
+            font-size: 14pt;
+            font-weight: 700;
+            margin-top: 18pt;
+            margin-bottom: 12pt;
+            text-transform: uppercase;
+          }
+          p {
+            margin-top: 0;
+            margin-bottom: 14pt;
+            text-indent: 0.5in;
+          }
+          /* Custom styling for heading lines that don't have indent */
+          p strong:only-child, p b:only-child {
+            text-indent: 0;
+            display: block;
+            margin-top: 18pt;
+            margin-bottom: 12pt;
+            font-size: 14pt;
+            text-transform: uppercase;
+          }
+          ol, ul {
+            margin-bottom: 14pt;
+            padding-left: 24pt;
+          }
+          li {
+            margin-bottom: 6pt;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 18pt;
+            font-size: 11pt;
+          }
+          th, td {
+            border: 1px solid #444444;
+            padding: 8px 12px;
+            text-align: left;
+          }
+          th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+          }
+          /* Prevent page breaks inside paragraphs or tables if possible */
+          p, tr, li {
+            page-break-inside: avoid;
+          }
+        </style>
+      </head>
+      <body>
+        ${htmlContent}
+      </body>
+    </html>
+  `;
+
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(styledHtml, { waitUntil: "networkidle" });
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: {
+        top: "1.25in",
+        bottom: "1.25in",
+        left: "1.25in",
+        right: "1.25in"
+      }
+    });
+    return Buffer.from(pdfBuffer);
+  } finally {
+    await browser.close();
+  }
 }

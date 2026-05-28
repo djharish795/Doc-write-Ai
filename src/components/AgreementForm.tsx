@@ -131,7 +131,7 @@ export default function AgreementForm({
         a.href = url;
         a.download = `Agreement_${formData.buyerName || "Document"}_${
           formData.agreementDate || "Final"
-        }.docx`;
+        }.pdf`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -366,7 +366,7 @@ export default function AgreementForm({
                   Finalize Agreement Document
                 </p>
                 <p className="text-[10px] uppercase font-bold tracking-widest text-[#737373]">
-                  Download High-Quality DOCX
+                  Download High-Quality PDF
                 </p>
               </div>
               <ChevronRight className="w-6 h-6 text-[#737373] group-hover:opacity-100 group-hover:translate-x-2 transition-all" />
