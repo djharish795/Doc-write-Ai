@@ -1,47 +1,47 @@
-# ValuationStudio — AI-Powered Valuation Report Generator
+# AgreementStudio (Doc-write-Ai) — AI-Powered Legal Document Generator
 
-> **Intelligence Layer 4.6** — Empowered by Claude Sonnet AI & High-Fidelity Rendering
+> **Intelligence Layer 4.6** — Powered by Anthropic Claude & Playwright High-Fidelity PDF Rendering
 
-ValuationStudio is a Next.js AI application that automates the generation of professional property valuation reports. It digitally reconstructs any uploaded report template, extracts legal data from Telugu Sale Deeds using Claude, and produces a fully formatted, bank-ready output — in minutes.
+AgreementStudio is an advanced Next.js AI-powered application that automates the generation of professional, bank-ready legal agreements. It digitally maps custom document templates, extracts crucial legal details from Telugu Sale Deeds using Claude, and produces a highly polished, print-ready PDF in seconds.
 
 ---
 
 ## ✨ Features
 
-- **Template Digital Twin** — Upload any previous bank-authorized PDF report; AI reconstructs its exact layout as a Tailwind-based HTML template
-- **Telugu Sale Deed Extraction** — Automatically parses scanned/PDFs deeds (including handwritten Telugu) to extract party names, property dimensions, survey numbers, and financials
-- **Automated Financial Mathematics** — Enters market rate & government rate once; all area calculations, values, and deductions are computed automatically
-- **AI Intelligence Review** — Editable form pre-filled by AI before the final report is generated
-- **One-click Report Export** — Generates a pixel-perfect HTML report matching the original template's style
+- **Telugu Sale Deed Extraction** — Automatically parses scanned PDFs or images of deeds (including handwritten/printed Telugu) using Claude to extract party details (Buyer & Seller), parent names, addresses, survey numbers, boundaries, and transaction history.
+- **Template Digital Twin** — Upload any PDF or DOCX agreement template. The system analyzes its structure, layout, and required variables to prepare it for high-fidelity generation.
+- **Intelligent Financial Calculations** — Enter the total transaction and advance amounts; the system instantly auto-calculates balance payments and displays them dynamically in the UI.
+- **Interactive Review & Configuration** — An editable, step-by-step review wizard pre-filled by AI allows manual overrides and adjustments before final generation.
+- **Premium Print-Ready PDF Generation** — Compiles the final document with professional, legal-grade serif typography (`Lora`, `Georgia`), strict margins (1.25"), justified alignments, and page-break optimization using Mammooth and Playwright.
 
 ---
 
 ## 🗂 Project Structure
 
 ```
-valuation-report-gen/
+Doc-write-Ai/
 ├── src/
 │   ├── app/
-│   │   ├── page.tsx                    # Main 4-step workflow UI
+│   │   ├── page.tsx                    # Main 5-step interactive workflow UI
 │   │   ├── layout.tsx                  # Root layout & global fonts
-│   │   ├── globals.css                 # Global styles & design tokens
+│   │   ├── globals.css                 # Global CSS styles & dark design tokens
 │   │   └── api/
-│   │       ├── analyze-template/       # POST: Analyze report template image → Tailwind HTML + data schema
-│   │       ├── extract-data/           # POST: Extract data from Telugu deed PDF → JSON
-│   │       └── generate-report/        # POST: Merge data + template → Final HTML report
+│   │       ├── analyze-template/       # POST: Analyze layout & identify required variables
+│   │       ├── extract-data/           # POST: AI extraction from Telugu Sale Deed via Claude
+│   │       └── generate-report/        # POST: Merge data & convert DOCX → Styled PDF via Playwright
 │   ├── components/
-│   │   ├── ValuationForm.tsx           # Editable data review form (Step 4)
-│   │   └── FileUploader.tsx            # Drag-and-drop file upload component
+│   │   ├── AgreementForm.tsx           # Edit details, configure variables & download PDF (Step 5)
+│   │   └── FileUploader.tsx            # Premium drag-and-drop file uploader
 │   └── lib/
-│       ├── utils.ts                    # Tailwind class merging utilities
-│       └── cache-utils.ts              # Server-side caching helpers
+│       ├── utils.ts                    # Classnames utility helper
+│       ├── cache-utils.ts              # Server-side caching helpers
+│       └── aiService.ts                # Anthropic Claude API connection & credential checks
 ├── public/
 │   └── favicon.ico
-├── .env.local                          # Environment variables (API keys)
-├── .env.example                        # Template for environment setup
-├── package.json
-├── tailwind.config.ts
-└── tsconfig.json
+├── .env.example                        # Template for environment configuration
+├── package.json                        # Project dependencies (Playwright, Mammoth, Anthropic SDK)
+├── tailwind.config.ts                  # Tailwind configuration
+└── tsconfig.json                       # TypeScript compiler configuration
 ```
 
 ---
@@ -57,8 +57,8 @@ valuation-report-gen/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/LokeshSaiSri/valuation_report_ai.git
-cd valuation_report_ai
+git clone https://github.com/djharish795/Doc-write-Ai.git
+cd Doc-write-Ai
 ```
 
 ### 2. Install Dependencies
@@ -69,18 +69,18 @@ npm install
 
 ### 3. Configure Environment Variables
 
-Copy the example env file and add your API key:
-
-```bash
-cp .env.example .env.local
-```
-
-Then edit `.env.local`:
+Create a `.env` file at the root of the project:
 
 ```env
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-CLAUDE_MODEL=claude-sonnet-4-6
+# Anthropic Claude API Key
+ANTHROPIC_API_KEY=your_actual_anthropic_api_key_here
+
+# Claude Model
+CLAUDE_MODEL=claude-3-5-sonnet-20241022
 ```
+
+> [!NOTE]
+> `.env` is listed in `.gitignore` and will never be committed to GitHub. Keep `.env.example` as a safe placeholder file without any actual secrets.
 
 ### 4. Run the Development Server
 
@@ -96,31 +96,32 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Variable | Required | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | ✅ Yes | Your Anthropic API key from [console.anthropic.com](https://console.anthropic.com) |
-| `CLAUDE_MODEL` | Optional | Claude model to use. Defaults to `claude-sonnet-4-6` |
+| `ANTHROPIC_API_KEY` | ✅ Yes | Your Anthropic API key starting with `sk-ant-` |
+| `CLAUDE_MODEL` | Optional | Claude model to use. Defaults to `claude-3-5-sonnet-20241022` |
 
 ---
 
-## 🔄 Workflow — How It Works
+## 🔄 Workflow — Step-by-Step
 
 ```
-Step 1: Template Upload
-  └─ Upload a reference valuation report (PDF/image)
-  └─ AI analyzes layout, branding, and structure
-  └─ Generates a Tailwind HTML digital twin + data schema
+Step 1: Upload Sale Deed
+  └─ Upload the Telugu Sale Deed (PDF/Image)
+  └─ AI processes and extracts buyer/seller details and financials instantly
 
-Step 2: Sale Deed Acquisition
-  └─ Upload the Telugu Sale Deed (scanned PDF or image)
-  └─ Stored for AI-powered extraction
+Step 2: Upload Agreement Template
+  └─ Drag-and-drop your custom DOCX or PDF template
+  └─ AI analyzes and maps the template fields
 
-Step 3: Base Rate Input
-  └─ Enter current Market Rate (₹ per sq yard/ft)
-  └─ Enter Government Rate
-  └─ AI extracts all other data and computes financials automatically
+Step 3: Agreement Details
+  └─ Verify or override extracted party names, addresses, and parent names
+  └─ Input total transaction amount and advance payments (balance is calculated automatically)
 
-Step 4: Intelligence Review & Export
-  └─ Review and edit AI-extracted data in an editable form
-  └─ Generate the final pixel-perfect valuation report
+Step 4: Review Configuration
+  └─ Check a final visual summary of the transaction structure before compilation
+
+Step 5: Generate & Export
+  └─ Adjust final custom form values pre-filled from your template analysis
+  └─ Generate and download a premium, print-ready, high-fidelity PDF
 ```
 
 ---
@@ -133,60 +134,25 @@ Step 4: Intelligence Review & Export
 | **Language** | TypeScript |
 | **Styling** | Tailwind CSS v3 |
 | **AI Engine** | [Anthropic Claude](https://anthropic.com) via `@anthropic-ai/sdk` |
-| **Forms** | React Hook Form |
+| **PDF Generation** | [Playwright](https://playwright.dev) & [Mammoth](https://github.com/mwilliamson/mammoth.js) |
 | **Icons** | Lucide React |
-| **UI Utilities** | clsx, tailwind-merge |
 
 ---
 
 ## 📡 API Routes
 
 ### `POST /api/analyze-template`
-Analyzes an uploaded report template image and returns a Tailwind HTML layout + JSON data schema.
-
-**Body:**
-```json
-{ "imageUrl": "<base64 data URL of the template image>" }
-```
-
-**Response:**
-```json
-{
-  "tailwindTemplate": "<html string with Tailwind classes>",
-  "dataSchema": [{ "key": "field_name", "label": "Field Label", "type": "text" }]
-}
-```
+Analyzes an uploaded report template and returns required variables.
 
 ---
 
 ### `POST /api/extract-data`
-Extracts property and financial data from a Telugu sale deed PDF.
-
-**Body:**
-```json
-{
-  "pdfUrl": "<base64 data URL of the deed PDF>",
-  "schema": [...],
-  "baseRates": { "marketRate": "5000", "governmentRate": "3200" }
-}
-```
-
-**Response:** JSON object matching the data schema fields.
+Extracts structured property and buyer/seller data from a Telugu sale deed.
 
 ---
 
 ### `POST /api/generate-report`
-Merges extracted data into the Tailwind template and returns a final HTML report.
-
-**Body:**
-```json
-{
-  "template": "<tailwind html string>",
-  "data": { "field_name": "value", ... }
-}
-```
-
-**Response:** `text/html` — the final rendered report.
+Merges the extracted and verified fields into the template, applies premium CSS print styles, and converts it into a high-fidelity PDF buffer.
 
 ---
 
@@ -197,17 +163,10 @@ Merges extracted data into the Tailwind template and returns a final HTML report
 | `npm run dev` | Start development server at `localhost:3000` |
 | `npm run build` | Build production bundle |
 | `npm run start` | Run production server |
-| `npm run lint` | Run ESLint |
+| `npm run lint` | Run ESLint check |
 
 ---
 
 ## 📝 License
 
 Private project — All rights reserved © 2026 Naprocs.
-
----
-
-## 👤 Author
-
-**Lokesh Sai Sri Ganapaneni**  
-Built for: Naprocs Client Projects
